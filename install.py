@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import platform
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -86,12 +87,27 @@ def venv_gdrive() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Системное хранилище + CA-бандл из окружения, без строгого X.509 (Python 3.13+).
+
+    Python 3.13 включил VERIFY_X509_STRICT: корневой сертификат корпоративного прокси
+    с TLS-инспекцией без Authority Key Identifier отвергается, хотя доверен в системе
+    («Missing Authority Key Identifier»). Снимаем только этот флаг: проверка цепочки и
+    имени хоста остаётся.
+    """
+    bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
+    ctx = ssl.create_default_context(cafile=bundle or None)
+    strict = getattr(ssl, "VERIFY_X509_STRICT", 0)
+    ctx.verify_flags &= ~strict
+    return ctx
+
+
 def _get(url: str, accept: str | None = None) -> bytes:
     headers = {"User-Agent": "gdrive-installer"}
     if accept:
         headers["Accept"] = accept
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as resp:
         return resp.read()
 
 
