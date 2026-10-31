@@ -1,6 +1,8 @@
 # mr-gdrive-dist
 
 Публичный репозиторий для распространения wheel пакета `gdrive`.
+Проверенный агент: официальное расширение Claude Code (`anthropic.claude-code`).
+Для других агентов: `gdrive install-assets --dest <каталог skills>` (без гарантий).
 
 ## Установка
 
@@ -8,38 +10,43 @@
 python install.py
 ```
 
-Скрипт автоматически:
-- Скачает последнюю версию wheel из GitHub Releases
-- Установит пакет через pip
-- Настроит каталог кэша
-- Установит агентские ассеты (для Claude/Cline)
-- Инициализирует диск
-- Выполнит авторизацию
+Скрипт (только стандартная библиотека Python 3.10+):
+- скачивает последний релиз и проверяет sha256;
+- создаёт venv (`%LOCALAPPDATA%\gdrive\venv` на Windows, `~/.local/share/gdrive/venv` на macOS);
+- добавляет команду `gdrive` в PATH;
+- ставит skill для Claude Code (`gdrive install-assets`);
+- выполняет `gdrive login`, `gdrive init --sa`, `gdrive refresh --full`, `gdrive auth-check`.
+
+Опции: `--skip-login`, `--skip-init`, `--version X.Y.Z`.
+
+Доступ к Drive есть только с разрешённых IP (RDP-сервер, рабочий VPN). С других адресов
+команды вернут `PERMISSION_DENIED`.
 
 ## Обновление
 
 ```bash
-pip install --upgrade https://github.com/nbspgit/mr-gdrive-dist/releases/latest/download/mr_gdrive-*.whl
+gdrive self-update
 ```
+
+## Релизы
+
+Каждый релиз содержит `gdrive-<версия>-py3-none-any.whl` и `gdrive-<версия>-py3-none-any.whl.sha256`.
+Релиз без `.sha256` установщик и `self-update` отклоняют.
 
 ## Безопасность
 
-Этот репозиторий содержит только скомпилированные wheel-файлы, не исходный код.
-Исходный код находится в приватном репозитории `mr_gdrive`.
+Репозиторий содержит только wheel-файлы. Исходный код — в приватном репозитории `mr_gdrive`.
 
 При компрометации OAuth client secret:
 1. Перевыпустить секрет в GCP Console
 2. Обновить `DEFAULT_CLIENT_SECRET` в исходном репо
-3. Пересобрать wheel и опубликовать новый релиз
-4. Пользователи обновят пакет — перелогин не требуется
+3. Выпустить новый релиз (`scripts/publish-wheel.sh`)
+4. Пользователи выполняют `gdrive self-update`; перелогин не требуется
 
 ## Для разработчиков
 
-Скрипт публикации wheel из приватного репо:
-
 ```bash
 cd /path/to/mr_gdrive
+pip install -e ".[dev]"
 ./scripts/publish-wheel.sh
 ```
-
-Это соберёт wheel, создаст GitHub Release и загрузит артефакты.
