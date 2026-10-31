@@ -188,11 +188,35 @@ def add_windows_user_path(directory: Path) -> None:
             current, kind = "", winreg.REG_EXPAND_SZ
         entries = [e for e in current.split(";") if e]
         norm = os.path.normcase(os.path.normpath(str(directory)))
-        if any(os.path.normcase(os.path.normpath(e)) == norm for e in entries):
-            return
-        entries.append(str(directory))
-        winreg.SetValueEx(key, "Path", 0, kind, ";".join(entries))
-    info(f"Добавлено в пользовательский PATH: {directory} (откройте новый терминал)")
+        already = any(os.path.normcase(os.path.normpath(e)) == norm for e in entries)
+        if not already:
+            entries.append(str(directory))
+            winreg.SetValueEx(key, "Path", 0, kind, ";".join(entries))
+    # Запись в реестр сама по себе не обновляет окружение уже запущенного explorer.exe
+    # (в RDP-сеансе после disconnect он живёт). Без рассылки новые терминалы
+    # наследуют старый PATH. Рассылаем всегда — это чинит и повторный запуск.
+    _broadcast_environment_change()
+    if already:
+        info(f"PATH уже содержит {directory}")
+    else:
+        info(f"Добавлено в пользовательский PATH: {directory} (откройте новый терминал)")
+
+
+def _broadcast_environment_change() -> None:
+    """Сообщить окнам Windows, что переменные окружения изменились (WM_SETTINGCHANGE)."""
+    try:
+        import ctypes
+
+        HWND_BROADCAST = 0xFFFF
+        WM_SETTINGCHANGE = 0x001A
+        SMTO_ABORTIFHUNG = 0x0002
+        result = ctypes.c_ulong()
+        ctypes.windll.user32.SendMessageTimeoutW(  # type: ignore[attr-defined]
+            HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment",
+            SMTO_ABORTIFHUNG, 5000, ctypes.byref(result),
+        )
+    except Exception as e:  # не критично: PATH уже в реестре
+        warn(f"Не удалось разослать уведомление об изменении PATH: {e}")
 
 
 def ensure_on_path() -> None:
