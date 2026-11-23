@@ -154,16 +154,25 @@ def create_venv_and_install(wheel: Path) -> None:
         info(f"Создан venv: {vdir}")
     else:
         info(f"Используется существующий venv: {vdir}")
+
+    pip = [str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check"]
+    # Вывод pip не перехватываем: первая установка — ~60 МБ зависимостей (pandas,
+    # pyarrow, duckdb, numpy) и компиляция .pyc, на RDP это минуты. Без прогресса
+    # установка выглядит зависшей, и её прерывают.
+    print()
+    print("  Установка зависимостей (первый раз ~60 МБ, может занять несколько минут)...")
+    if subprocess.run([*pip, str(wheel)]).returncode != 0:
+        fail("pip install не удался (см. вывод выше)")
+    # Переустанавливаем только сам gdrive: при повторном запуске той же версии pip
+    # иначе пропустит пакет, а --force-reinstall со всеми зависимостями заново
+    # качает и распаковывает их целиком.
     proc = subprocess.run(
-        [
-            str(venv_python()), "-m", "pip", "install", "--upgrade", "--force-reinstall",
-            "--disable-pip-version-check", str(wheel),
-        ],
+        [*pip, "--force-reinstall", "--no-deps", "--quiet", str(wheel)],
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
-        fail(f"pip install не удался:\n{proc.stderr[-2000:]}")
+        fail(f"pip install gdrive не удался:\n{proc.stderr[-2000:]}")
     if not venv_gdrive().exists():
         fail(f"После установки не найден {venv_gdrive()}")
     info("Пакет gdrive установлен")
@@ -331,5 +340,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n❌ Установка прервана. Запустите python install.py ещё раз —", file=sys.stderr)
+        print("   уже скачанное и установленное повторно не загружается.", file=sys.stderr)
+        sys.exit(130)
 
