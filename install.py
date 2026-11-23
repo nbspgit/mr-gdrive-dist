@@ -146,6 +146,23 @@ def download_verified_wheel(release: dict, dest_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def installed_gdrive_version() -> str | None:
+    """Версия gdrive в venv или None (venv нет, пакет не стоит или сломан)."""
+    if not venv_python().exists():
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                str(venv_python()), "-c",
+                "import importlib.metadata as m; print(m.version('gdrive'))",
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+
 def create_venv_and_install(wheel: Path) -> None:
     vdir = venv_dir()
     if not venv_python().exists():
@@ -155,24 +172,29 @@ def create_venv_and_install(wheel: Path) -> None:
     else:
         info(f"Используется существующий venv: {vdir}")
 
-    pip = [str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check"]
-    # Вывод pip не перехватываем: первая установка — ~60 МБ зависимостей (pandas,
-    # pyarrow, duckdb, numpy) и компиляция .pyc, на RDP это минуты. Без прогресса
-    # установка выглядит зависшей, и её прерывают.
+    wheel_version = wheel.name.split("-")[1]
+    was_installed = installed_gdrive_version() == wheel_version
+
+    # Вывод pip никогда не перехватываем: на RDP скачивание ~60 МБ идёт на десятках
+    # КБ/с, и установка без вывода выглядит зависшей. --no-compile: .pyc для тысяч
+    # файлов pandas/pyarrow/numpy (под антивирусом это долго) Python создаст сам
+    # при первом импорте, и только для нужных модулей.
+    pip = [
+        str(venv_python()), "-m", "pip", "install",
+        "--disable-pip-version-check", "--no-compile",
+    ]
     print()
     print("  Установка зависимостей (первый раз ~60 МБ, может занять несколько минут)...")
     if subprocess.run([*pip, str(wheel)]).returncode != 0:
         fail("pip install не удался (см. вывод выше)")
-    # Переустанавливаем только сам gdrive: при повторном запуске той же версии pip
-    # иначе пропустит пакет, а --force-reinstall со всеми зависимостями заново
-    # качает и распаковывает их целиком.
-    proc = subprocess.run(
-        [*pip, "--force-reinstall", "--no-deps", "--quiet", str(wheel)],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        fail(f"pip install gdrive не удался:\n{proc.stderr[-2000:]}")
+    info("Зависимости установлены")
+
+    # Та же версия уже стояла — pip её пропустил; переустанавливаем только gdrive
+    # (починка повреждённой установки), зависимости не трогаем.
+    if was_installed:
+        print(f"  Переустановка gdrive {wheel_version}...")
+        if subprocess.run([*pip, "--force-reinstall", "--no-deps", str(wheel)]).returncode != 0:
+            fail("pip install gdrive не удался (см. вывод выше)")
     if not venv_gdrive().exists():
         fail(f"После установки не найден {venv_gdrive()}")
     info("Пакет gdrive установлен")
